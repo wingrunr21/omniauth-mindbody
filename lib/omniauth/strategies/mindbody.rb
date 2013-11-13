@@ -7,6 +7,8 @@ module OmniAuth
       include OmniAuth::Strategy
 
       option :fields, [:email, :password]
+      option :enable_client_logins, true
+      option :enable_staff_logins, true
 
       def request_phase
         form = OmniAuth::Form.new(:title => "User Info", :url => callback_path)
@@ -19,8 +21,18 @@ module OmniAuth
 
       def callback_phase
         begin
-          res = ::MindBody::Services::ClientService.validate_login(request.params['email'], request.params['password'])
-          return fail!(:invalid_credentials) unless res.status == "Success"
+          res = nil
+          if options.enable_client_logins
+            res = ::MindBody::Services::ClientService.validate_login(request.params['email'], request.params['password'])
+          end
+
+          if (res.status != "Success" || res.nil?) && options.enable_staff_logins
+            res = ::MindBody::Services::StaffService.get_staff('StaffCredentials' => {'Username' => request.params['email'], 
+                                                                                      'Password' => request.params['password'],
+                                                                                      'SiteIDs' => {'int' => ::MindBody.configuration.site_ids}})
+          end
+
+          return fail!(:invalid_credentials) if res.nil? || res.status != "Success"
 
           @raw_info ||= res.result
           super
@@ -29,18 +41,18 @@ module OmniAuth
         end
       end
 
-      uid { client.id.to_s }
+      uid { profile.id.to_s }
 
       info do
         {
-          :name => client.name,
-          :first_name => client.first_name,
-          :last_name => client.last_name,
-          :email => client.email,
-          :phone => client.home_phone || client.mobile_phone,
-          :location => client.city.nil? ? "#{client.city}, #{client.state}" : client.state,
-          :nickname => client.username,
-          :image => client.photo_url
+          :name => profile.name,
+          :first_name => profile.first_name,
+          :last_name => profile.last_name,
+          :email => profile.email,
+          :phone => profile.home_phone || profile.mobile_phone,
+          :location => profile.city.nil? ? "#{profile.city}, #{profile.state}" : profile.state,
+          :nickname => profile.username,
+          :image => profile.photo_url
         }
       end
 
@@ -49,15 +61,27 @@ module OmniAuth
       end
 
       extra do
-        {:raw_info => raw_info}
+        {:raw_info => raw_info,
+         :login_type => login_type}
       end
 
       def raw_info
         @raw_info
       end
 
-      def client
-        @client ||= raw_info[:client]
+      def profile
+        @profile ||= raw_info[:client] || raw_info[:staff_members]
+      end
+
+      def login_type
+        case
+        when raw_info.has_key?(:client)
+          'client'
+        when raw_info.has_key?(:staff_members)
+          'staff'
+        else
+          'unknown'
+        end
       end
     end
   end

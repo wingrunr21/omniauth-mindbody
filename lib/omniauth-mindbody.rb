@@ -1,1 +1,1 @@
-require 'omniauth/mindbody'
+require 'omniauth/mindbody/mindbody'
